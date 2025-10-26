@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Acceso | Gestión de Mantenciones</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+
+<body>
+
+    <div class="login-gate">
+        <div class="login-card">
+            <h2 class="login-title"><i class="fa-solid fa-right-to-bracket"></i> Iniciar sesión</h2>
+            <div class="form-grid">
+                <label class="col-2">Tipo de usuario
+                    <select id="gateRole" onchange="togglePin()">
+                        <option value="mecanico">Mecánico</option>
+                        <option value="jefe">Jefe</option>
+                    </select>
+                </label>
+                <label id="gatePinWrap" class="col-2" style="display:none;">PIN (solo Jefe)
+                    <input type="password" id="gatePin" placeholder="••••">
+                </label>
+                <div class="col-2">
+                    <button class="btn" onclick="entrar()">Entrar</button>
+                </div>
+            </div>
+            <p class="muted" style="margin-top:8px;">* PIN por defecto: <code>2468</code> (cámbialo en el código).</p>
+        </div>
+    </div>
+
+    <script>
+        const OWNER_PIN = "2468";                 // <--- cámbialo cuando quieras
+        const SESSION_KEY = "app_role_token";     // "jefe" | "mecanico"
+
+        function togglePin() {
+            const show = document.getElementById('gateRole').value === 'jefe';
+            document.getElementById('gatePinWrap').style.display = show ? 'block' : 'none';
+        }
+
+        function entrar() {
+            const role = document.getElementById('gateRole').value;
+            if (role === 'jefe') {
+                const pin = (document.getElementById('gatePin').value || '').trim();
+                if (pin !== OWNER_PIN) {
+                    alert('PIN incorrecto'); return;
+                }
+            }
+            // guardamos token y redirigimos
+            localStorage.setItem(SESSION_KEY, role);
+            window.location.href = role === 'jefe' ? 'jefe.html' : 'mecanico.html';
+        }
+    </script>
+</body>
+
+</html>

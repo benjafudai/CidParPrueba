@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Mecánico | Gestión de Mantenciones</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+
+<body>
+
+    <header>
+        <h1>Gestión de Mantenciones — Mecánico</h1>
+        <div id="sessionBar">
+            <span class="badge">Mecánico</span>
+            <button class="btn-outline btn-sm" onclick="logout()"><i class="fa-solid fa-arrow-right-from-bracket"></i>
+                Cerrar sesión</button>
+        </div>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab-btn active" onclick="mostrarSeccion('dashboard', this)">
+            <i class="fa-solid fa-truck"></i> Dashboard
+        </button>
+    </nav>
+
+    <section id="dashboardSection" class="seccion">
+        <!-- Columna izquierda: camiones -->
+        <div class="camion-list">
+            <h2>Buscar Camión</h2>
+            <div class="buscador">
+                <input id="codigoBuscador" type="text" placeholder="Ingresa el código (ej: CAM-001)" />
+                <button class="btn" onclick="buscarCamion()">Buscar</button>
+            </div>
+
+            <h3>Camiones Disponibles</h3>
+            <div id="camionList"></div>
+        </div>
+
+        <!-- Columna derecha: subir archivos -->
+        <div id="uploadSection" class="panel">
+            <h3>Subir archivo a camión</h3>
+            <label for="codigoArchivo">Código del camión:</label>
+            <input id="codigoArchivo" type="text" placeholder="Ej: CAM-001" /><br />
+            <label for="archivoInput">Selecciona archivo:</label>
+            <input id="archivoInput" type="file" accept=".pdf,.xlsx,.xls,.csv" /><br />
+            <button class="btn" onclick="subirArchivo()">Subir archivo</button>
+            <p id="uploadStatus" class="muted"></p>
+        </div>
+    </section>
+
+    <!-- VISOR -->
+    <section id="visorSection" class="seccion" style="display:none;">
+        <h2>Visor de Informes</h2>
+        <div id="visorWrapper">
+            <p id="visorInfo" class="muted"></p>
+
+            <!-- Historial -->
+            <div class="historial">
+                <button class="btn-outline" onclick="toggleHistorial()">Mostrar/Ocultar Historial</button>
+                <div class="historial-content" id="historialContent"></div>
+            </div>
+
+            <!-- Iframe (PDF soportados) -->
+            <div class="planilla-reciente" id="iframePanel">
+                <iframe id="visor" width="100%" height="360" title="Planilla reciente"></iframe>
+            </div>
+
+            <!-- Vista previa Excel (tabla) -->
+            <div id="excelPanel" class="panel" style="display:none;">
+                <header>Vista previa Excel <span id="excelMeta" class="pill"></span></header>
+                <div id="excelTableWrapper" class="cuerpo">
+                    <div id="excelTableContainer"></div>
+                </div>
+            </div>
+
+            <!-- Odómetro -->
+            <div id="odometroPanel" class="panel">
+                <header>Odómetro</header>
+                <div class="form-inline">
+                    <div class="odobox">
+                        <div class="muted">Último registro</div>
+                        <div id="odoUltimo" class="odo-num">—</div>
+                    </div>
+                    <label>Nuevo kilometraje
+                        <input type="number" id="odoInput" placeholder="Ej: 356000">
+                    </label>
+                    <button class="btn" onclick="guardarOdometro()">Guardar</button>
+                </div>
+                <p id="odoMsg" class="muted"></p>
+            </div>
+
+            <!-- Plan de mantención programada -->
+            <div id="planPanel" class="panel">
+                <header>Plan de mantención programada <span id="planCount" class="pill">0</span></header>
+                <div id="planLista" class="cuerpo"></div>
+                <p class="muted" style="margin-top:6px;">* Puedes marcar tareas como <b>Hechas</b> cuando las completes.
+                </p>
+            </div>
+
+            <!-- Advertencias -->
+            <div id="alertaAdvertencias" class="alert-warning" style="display:none;">
+                <div class="titulo"><i class="fa-solid fa-triangle-exclamation"></i> Advertencias detectadas</div>
+                <div id="alertaContenido"></div>
+            </div>
+
+            <!-- Observaciones y Valores -->
+            <div id="observacionesPanel" class="panel">
+                <header>Observaciones <span id="obsCount" class="pill">0</span></header>
+                <div id="observacionesLista" class="cuerpo"></div>
+            </div>
+
+            <div id="valoresPanel" class="panel">
+                <header>Valores Registrados <span id="valCount" class="pill">0</span></header>
+                <div id="valoresLista" class="cuerpo"></div>
+            </div>
+
+            <!-- Gráficos -->
+            <div id="chartContainer" class="charts-grid">
+                <canvas id="chartEstados" height="240"></canvas>
+                <canvas id="chartPuntajeCat" height="240"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <!-- Librerías -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        /* ======== Guard: sólo Mecánico ======== */
+        const SESSION_KEY = "app_role_token";
+        (function guard() {
+            const role = localStorage.getItem(SESSION_KEY);
+            if (role !== 'mecanico') { window.location.href = 'login.html'; }
+        })();
+        function logout() { localStorage.removeItem(SESSION_KEY); window.location.href = 'login.html'; }
+
+        /* ======== Storage keys compartidos ======== */
+        const KM_KEY = "app_km_by_truck";       // { CAM-001: {km, ts} }
+        const TASKS_KEY = "app_tasks_by_truck";    // { CAM-001: [task,...] }
+        const LOGS_KEY = "app_audit_log";         // [ {ts, rol, accion, detalle} ]
+        // util log (para mecánico)
+        function logAction(rol, accion, detalle) {
+            const arr = JSON.parse(localStorage.getItem(LOGS_KEY) || "[]");
+            arr.push({ ts: new Date().toISOString(), rol, accion, detalle });
+            localStorage.setItem(LOGS_KEY, JSON.stringify(arr));
+        }
+
+        /* ======== Datos base ======== */
+        const camiones = [
+            { codigo: "CAM-001", nombre: "Mercedes-Benz Actros", año: 2012, historial: ["planilla_2023-03.pdf"] },
+            { codigo: "CAM-002", nombre: "Mercedes-Benz Actros", año: 2012, historial: ["planilla_2022-07.pdf"] },
+            { codigo: "CAM-003", nombre: "Mercedes Axor", año: 2012, historial: ["planilla_2023-01.pdf"] },
+            { codigo: "CAM-004", nombre: "Renault T480", año: 2024, historial: ["planilla_2024-01.pdf"] }
+        ];
+        const STATUS_SCORE = { "OK": 0, "FALLA": 5, "N/A": 0 };
+        const WARNING_KEYWORDS = ["fuga", "fugas", "aceite", "reemplazar", "cambiar", "urgente", "crítico", "critico", "bajo", "alto", "sobrecalent", "desgaste", "rotura", "daño", "fractura", "riesgo", "peligro", "fallo", "alerta", "ruido", "golpe", "vibración", "vibracion"];
+
+        let historialVisible = false, visorCamionActual = null;
+        let chartEstados = null, chartPuntajeCat = null;
+        const advertenciasPorCamion = {};
+
+        function mostrarSeccion(seccion, boton) {
+            document.getElementById("dashboardSection").style.display = (seccion === 'dashboard') ? 'flex' : 'none';
+            if (seccion !== 'dashboard') document.getElementById("visorSection").style.display = 'none';
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            if (boton) boton.classList.add('active');
+        }
+
+        function generarCamiones() {
+            const list = document.getElementById("camionList"); list.innerHTML = "";
+            camiones.forEach(c => {
+                const div = document.createElement('div'); div.className = 'camion';
+                div.innerHTML = `<h3>${c.codigo} — ${c.nombre} (${c.año})</h3>
+                         <button class="btn" onclick="mostrarInformes('${c.codigo}')">Ver Informes</button>`;
+                list.appendChild(div);
+            });
+        }
+
+        function buscarCamion() {
+            const code = document.getElementById('codigoBuscador').value.trim().toUpperCase();
+            if (!code) { alert('Ingresa el código'); return; }
+            const c = camiones.find(x => x.codigo === code);
+            if (!c) { alert('No se encontró el camión'); return; }
+            mostrarInformes(c.codigo);
+        }
+
+        function mostrarInformes(codigo) {
+            const camion = camiones.find(c => c.codigo === codigo); if (!camion) return;
+            document.getElementById("dashboardSection").style.display = 'none';
+            document.getElementById("visorSection").style.display = 'block';
+            document.getElementById("visorInfo").textContent = `${camion.codigo} — ${camion.nombre} (${camion.año})`;
+            visorCamionActual = camion.codigo;
+
+            actualizarHistorialVisor(camion);
+            if (camion.historial.length) { mostrarPlanilla(camion.codigo, camion.historial.at(-1)); }
+            renderAlerta(advertenciasPorCamion[visorCamionActual] || []);
+            resetCharts(); limpiarObservacionesYValores(); ocultarExcelPreview();
+
+            // cargar odómetro y plan
+            renderOdometro();
+            renderPlan();
+        }
+
+        function actualizarHistorialVisor(camion) {
+            const div = document.getElementById('historialContent');
+            div.innerHTML = camion.historial.map(p => `<a href="#" onclick="mostrarPlanilla('${camion.codigo}','${p}');return false;">${p}</a>`).join('');
+            div.style.display = historialVisible ? 'block' : 'none';
+        }
+        function toggleHistorial() { historialVisible = !historialVisible; document.getElementById('historialContent').style.display = historialVisible ? 'block' : 'none'; }
+
+        /* ===== Subida de archivos ===== */
+        function subirArchivo() {
+            const codigo = document.getElementById('codigoArchivo').value.trim().toUpperCase();
+            const input = document.getElementById('archivoInput');
+            const archivo = input.files[0];
+
+            if (!codigo || !archivo) { alert('Completa el código del camión y selecciona un archivo.'); return; }
+            const camion = camiones.find(c => c.codigo === codigo);
+            if (!camion) { alert('No se encontró un camión con ese código.'); return; }
+
+            camion.historial.push(archivo.name);
+            document.getElementById('uploadStatus').textContent = `Archivo "${archivo.name}" asociado a ${codigo}.`;
+            logAction('mecanico', 'subir_archivo', `${codigo} :: ${archivo.name}`);
+
+            if (visorCamionActual === codigo) {
+                actualizarHistorialVisor(camion);
+                mostrarPlanilla(codigo, archivo.name, archivo);
+
+                if (/\.(xlsx|xls|csv)$/i.test(archivo.name)) {
+                    leerExcelYProcesar(archivo, codigo);
+                } else {
+                    resetCharts();
+                    limpiarObservacionesYValores();
+                    ocultarExcelPreview();
+                }
+            }
+            input.value = "";
+        }
+
+        /* ===== Mostrar archivos en visor ===== */
+        function mostrarPlanilla(codigo, archivoNombre, fileObj = null) {
+            const visor = document.getElementById('visor'), iframePanel = document.getElementById('iframePanel'), excelPanel = document.getElementById('excelPanel');
+            if (fileObj) {
+                const isExcel = /\.(xlsx|xls|csv)$/i.test(fileObj.name);
+                if (isExcel) { mostrarExcelEnVisor(fileObj); return; }
+                const url = URL.createObjectURL(fileObj); visor.src = url; iframePanel.style.display = 'block'; excelPanel.style.display = 'none'; return;
+            }
+            const isExcelName = /\.(xlsx|xls|csv)$/i.test(archivoNombre);
+            if (isExcelName) { ocultarExcelPreview(); iframePanel.style.display = 'none'; }
+            else { visor.src = `informes/${codigo}/${archivoNombre}`; iframePanel.style.display = 'block'; excelPanel.style.display = 'none'; }
+        }
+        function ocultarExcelPreview() { document.getElementById('excelPanel').style.display = 'none'; document.getElementById('excelTableContainer').innerHTML = ""; document.getElementById('excelMeta').textContent = ""; }
+
+        function mostrarExcelEnVisor(file) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                const sn = wb.SheetNames[0], sh = wb.Sheets[sn]; renderExcelTable(sh, sn, file.name);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+        function renderExcelTable(sheet, sheetName, fileName) {
+            const html = XLSX.utils.sheet_to_html(sheet, { header: "" }), doc = new DOMParser().parseFromString(html, "text/html");
+            const table = doc.querySelector('table'); const cont = document.getElementById('excelTableContainer');
+            cont.innerHTML = ""; if (table) { table.classList.add('excel'); table.querySelectorAll('[width]').forEach(el => el.removeAttribute('width')); cont.appendChild(table); }
+            document.getElementById('excelMeta').textContent = `${fileName} — Hoja: ${sheetName}`;
+            document.getElementById('excelPanel').style.display = 'block'; document.getElementById('iframePanel').style.display = 'none';
+        }
+
+        /* ===== Excel → análisis ===== */
+        function leerExcelYProcesar(file, codigoCamion) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                const sn = wb.SheetNames[0], sh = wb.Sheets[sn];
+                // 1) Vista previa
+                renderExcelTable(sh, sn, file.name);
+                // 2) Procesamiento
+                const rows = XLSX.utils.sheet_to_json(sh, { defval: "" });
+                const { conteoEstados, puntajePorCategoria, observaciones, valores, advertencias } = procesarMantenimiento(rows);
+                advertenciasPorCamion[codigoCamion] = advertencias;
+                renderChartEstados(conteoEstados);
+                renderChartPuntajeCat(puntajePorCategoria);
+                renderObservaciones(observaciones);
+                renderValores(valores);
+                renderAlerta(advertencias);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function procesarMantenimiento(rows) {
+            const conteo = { OK: 0, FALLA: 0, "N/A": 0 }, puntajeCat = {}, observaciones = [], valores = [], advertencias = [];
+            for (const r of rows) {
+                const estado = detectarEstadoFila(r); conteo[estado] = (conteo[estado] || 0) + 1;
+                const cat = extraerCategoria(r); puntajeCat[cat] = (puntajeCat[cat] || 0) + (estado === 'FALLA' ? 5 : 0);
+                const desc = String(r["Descripción de la Tarea"] ?? r["Descripcion de la Tarea"] ?? "").trim();
+                const obs = String(r["Observaciones"] ?? r["Observaciones / Valores Registrados"] ?? "").trim();
+                const val = String(r["Valores Registrados"] ?? "").trim();
+                if (obs) { observaciones.push({ desc, obs }); if (contieneAdvertencia(obs)) advertencias.push({ desc, obs, val: "" }); }
+                if (val) { valores.push({ desc, val }); if (contieneAdvertencia(val)) advertencias.push({ desc, obs: "", val }); }
+            }
+            return { conteoEstados: conteo, puntajePorCategoria: puntajeCat, observaciones, valores, advertencias };
+        }
+        function detectarEstadoFila(row) {
+            const ok = marcado(row["OK"]), fa = marcado(row["Falla"]) || marcado(row["FALLA"]), na = marcado(row["N/A"]) || marcado(row["NA"]) || marcado(row["N.A."]);
+            if (fa) return "FALLA"; if (ok) return "OK"; if (na) return "N/A"; return "N/A";
+        }
+        function marcado(v) { if (v == null) return false; const s = String(v).trim().toLowerCase(); if (!s) return false; return ["x", "✓", "si", "sí", "true", "1", "ok"].includes(s); }
+        function extraerCategoria(row) {
+            const n = String(row["N°"] ?? row["Nº"] ?? "").trim(); if (n) { const base = n.split(",")[0]; return base || "Sin categoría"; }
+            const d = String(row["Descripción de la Tarea"] ?? "").trim(); const m = d.match(/^(\d+)/); return m ? m[1] : "Sin categoría";
+        }
+        function contieneAdvertencia(t) { t = String(t).toLowerCase(); return WARNING_KEYWORDS.some(k => t.includes(k)); }
+
+        function limpiarObservacionesYValores() {
+            document.getElementById('obsCount').textContent = "0"; document.getElementById('valCount').textContent = "0";
+            document.getElementById('observacionesLista').innerHTML = ""; document.getElementById('valoresLista').innerHTML = "";
+            document.getElementById('alertaAdvertencias').style.display = 'none'; document.getElementById('alertaContenido').innerHTML = "";
+        }
+        function renderObservaciones(items) {
+            const lista = document.getElementById('observacionesLista'), count = document.getElementById('obsCount'); lista.innerHTML = ""; count.textContent = String(items.length);
+            if (!items.length) { lista.innerHTML = `<div class="fila"><div class="desc">—</div><div class="valor">Sin observaciones.</div></div>`; return; }
+            items.forEach(({ desc, obs }) => { const d = document.createElement('div'); d.className = 'fila'; d.innerHTML = `<div class="desc">${desc || "—"}</div><div class="valor">${obs}</div>`; lista.appendChild(d); });
+        }
+        function renderValores(items) {
+            const lista = document.getElementById('valoresLista'), count = document.getElementById('valCount'); lista.innerHTML = ""; count.textContent = String(items.length);
+            if (!items.length) { lista.innerHTML = `<div class="fila"><div class="desc">—</div><div class="valor">Sin valores.</div></div>`; return; }
+            items.forEach(({ desc, val }) => { const d = document.createElement('div'); d.className = 'fila'; d.innerHTML = `<div class="desc">${desc || "—"}</div><div class="valor">${val}</div>`; lista.appendChild(d); });
+        }
+        function renderAlerta(adverts) {
+            const a = document.getElementById('alertaAdvertencias'), c = document.getElementById('alertaContenido');
+            if (!adverts.length) { a.style.display = 'none'; c.innerHTML = ""; return; }
+            a.style.display = 'block';
+            c.innerHTML = `Se detectaron <b>${adverts.length}</b> advertencia(s):
+        <ul class="ul-compact">${adverts.slice(0, 6).map(x => `<li>${x.obs || x.val || ""}</li>`).join("")}</ul>`;
+        }
+        function resetCharts() { if (chartEstados) { chartEstados.destroy(); chartEstados = null; } if (chartPuntajeCat) { chartPuntajeCat.destroy(); chartPuntajeCat = null; } }
+        function renderChartEstados(conteo) {
+            const ctx = document.getElementById('chartEstados').getContext('2d'); if (chartEstados) chartEstados.destroy();
+            chartEstados = new Chart(ctx, { type: 'pie', data: { labels: ['OK', 'Falla', 'N/A'], datasets: [{ data: [conteo.OK || 0, conteo.FALLA || 0, conteo["N/A"] || 0] }] }, options: { responsive: true } });
+        }
+        function renderChartPuntajeCat(p) {
+            const labels = Object.keys(p).sort((a, b) => Number(a) - Number(b)); const valores = labels.map(k => p[k] || 0);
+            const ctx = document.getElementById('chartPuntajeCat').getContext('2d'); if (chartPuntajeCat) chartPuntajeCat.destroy();
+            chartPuntajeCat = new Chart(ctx, { type: 'bar', data: { labels: labels, datasets: [{ label: 'Puntaje por categoría (Falla=5)', data: valores }] }, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
+        }
+
+        /* ===== Odómetro ===== */
+        function leerKM() { try { return JSON.parse(localStorage.getItem(KM_KEY) || "{}"); } catch { return {} } }
+        function guardarKM(map) { localStorage.setItem(KM_KEY, JSON.stringify(map)); }
+        function renderOdometro() {
+            const all = leerKM(); const data = all[visorCamionActual];
+            document.getElementById('odoUltimo').textContent = data ? `${Number(data.km).toLocaleString('es-CL')} km` : '—';
+            document.getElementById('odoMsg').textContent = data ? `Actualizado: ${new Date(data.ts).toLocaleString()}` : '';
+            document.getElementById('odoInput').value = '';
+        }
+        function guardarOdometro() {
+            const v = Number(document.getElementById('odoInput').value);
+            if (!v || v <= 0) { alert('Ingresa un kilometraje válido.'); return; }
+            const all = leerKM(); all[visorCamionActual] = { km: v, ts: new Date().toISOString() };
+            guardarKM(all);
+            logAction('mecanico', 'checkin_odometro', `${visorCamionActual} -> ${v} km`);
+            renderOdometro();
+            // recalcular estado de tareas
+            renderPlan();
+        }
+
+        /* ===== Plan de mantención programada (ver/ejecutar) ===== */
+        function leerTasks() { try { return JSON.parse(localStorage.getItem(TASKS_KEY) || "{}"); } catch { return {} } }
+        function guardarTasks(map) { localStorage.setItem(TASKS_KEY, JSON.stringify(map)); }
+        function getTasksFor(cod) { const all = leerTasks(); return Array.isArray(all[cod]) ? all[cod] : []; }
+        function saveTasksFor(cod, arr) { const all = leerTasks(); all[cod] = arr; guardarTasks(all); }
+
+        function renderPlan() {
+            const cont = document.getElementById('planLista');
+            const items = getTasksFor(visorCamionActual);
+            const kmAll = leerKM(); const odom = kmAll[visorCamionActual]?.km || null;
+            document.getElementById('planCount').textContent = String(items.length);
+            cont.innerHTML = "";
+            if (!items.length) {
+                cont.innerHTML = `<div class="fila"><div class="desc">—</div><div class="valor">No hay tareas programadas para este camión.</div></div>`;
+                return;
+            }
+            items.forEach(t => {
+                const estado = calcularEstadoTarea(t, odom);
+                const div = document.createElement('div');
+                div.className = 'task-item';
+                div.innerHTML = `
+          <div class="task-main">
+            <div class="task-title">${t.titulo}</div>
+            <div class="task-meta">
+              ${t.tipo === 'km'
+                        ? `Cada <b>${t.intervalo_km.toLocaleString('es-CL')}</b> km · Próximo: <b>${(t.proximo_km ?? '-').toLocaleString('es-CL')}</b> km`
+                        : `Cada <b>${t.intervalo_dias}</b> días · Próxima: <b>${t.proxima_fecha || '-'}</b>`
+                    }
+            </div>
+          </div>
+          <div class="task-side">
+            <span class="status-badge ${estado.clase}">${estado.texto}</span>
+            <button class="btn-outline btn-sm" onclick="marcarHecha('${t.id}')"><i class="fa-solid fa-check"></i> Hecha</button>
+          </div>
+        `;
+                cont.appendChild(div);
+            });
+        }
+
+        function calcularEstadoTarea(t, odom) {
+            const hoy = new Date();
+            if (t.tipo === 'km') {
+                if (!odom) return { texto: 'Sin odómetro', clase: 'status-gray' };
+                const rest = (t.proximo_km ?? t.intervalo_km) - odom;
+                if (rest <= 0) return { texto: 'Vencida por km', clase: 'status-red' };
+                if (rest <= 1000) return { texto: `Próx. en ${rest.toLocaleString('es-CL')} km`, clase: 'status-amber' };
+                return { texto: `OK (${rest.toLocaleString('es-CL')} km)`, clase: 'status-green' };
+            } else {
+                if (!t.proxima_fecha) return { texto: 'Sin fecha', clase: 'status-gray' };
+                const d = new Date(t.proxima_fecha);
+                const dias = Math.ceil((d - hoy) / (1000 * 60 * 60 * 24));
+                if (dias < 0) return { texto: 'Vencida por fecha', clase: 'status-red' };
+                if (dias <= 7) return { texto: `Próx. en ${dias} días`, clase: 'status-amber' };
+                return { texto: `OK (${dias} días)`, clase: 'status-green' };
+            }
+        }
+
+        function marcarHecha(taskId) {
+            const arr = getTasksFor(visorCamionActual);
+            const idx = arr.findIndex(t => t.id === taskId);
+            if (idx < 0) return;
+            const hoyISO = new Date().toISOString().slice(0, 10);
+            const kmAll = leerKM(); const odom = kmAll[visorCamionActual]?.km || null;
+
+            // actualizar historial
+            arr[idx].historial = arr[idx].historial || [];
+            arr[idx].historial.push({ fecha: hoyISO, km: odom });
+
+            // recalcular próximos
+            if (arr[idx].tipo === 'km') {
+                const base = odom || 0;
+                arr[idx].proximo_km = base + Number(arr[idx].intervalo_km || 0);
+            } else {
+                const base = new Date();
+                const dias = Number(arr[idx].intervalo_dias || 0);
+                const prox = new Date(base.getFullYear(), base.getMonth(), base.getDate() + dias);
+                arr[idx].proxima_fecha = prox.toISOString().slice(0, 10);
+            }
+
+            saveTasksFor(visorCamionActual, arr);
+            logAction('mecanico', 'tarea_hecha', `${visorCamionActual} :: ${arr[idx].titulo}`);
+            renderPlan();
+        }
+
+        // ------- INIT -------
+        generarCamiones();
+    </script>
+</body>
+
+</html>

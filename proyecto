@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Iniciar Sesión | Gestión de Mantenciones</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+
+<body>
+  <header>
+    <h1>Gestión de Mantenciones de Camiones</h1>
+  </header>
+
+  <main class="login-container">
+    <section class="login-panel">
+      <h2>Elige tu tipo de usuario</h2>
+      <p class="muted">Usa el perfil correcto para acceder a lo que necesitas.</p>
+
+      <div class="roles-grid">
+        <!-- Técnico Mecánico -->
+        <article class="role-card">
+          <div class="role-hero" aria-hidden="true">
+            <i class="fa-solid fa-wrench"></i>
+          </div>
+          <div class="role-title">Técnico Mecánico</div>
+          <div class="role-desc">Carga y visualización de planillas e informes. Acceso al visor.</div>
+          <div class="role-actions">
+            <button class="btn" onclick="login('mecanico')">Entrar como Técnico Mecánico</button>
+          </div>
+        </article>
+
+        <!-- Administrador (con contraseña) -->
+        <article class="role-card">
+          <div class="role-hero" aria-hidden="true">
+            <i class="fa-solid fa-user-tie"></i>
+          </div>
+          <div class="role-title">Administrador</div>
+          <div class="role-desc">Acceso completo: visor, análisis, gastos, bitácora y plan de mantención.</div>
+          <div class="role-actions">
+            <button class="btn" onclick="abrirModal()">Entrar (con contraseña)</button>
+          </div>
+        </article>
+
+        <!-- Conductor -->
+        <article class="role-card">
+          <div class="role-hero" aria-hidden="true">
+            <i class="fa-solid fa-truck-fast"></i>
+          </div>
+          <div class="role-title">Conductor</div>
+          <div class="role-desc">Solo visualización y búsqueda de informes técnicos y observaciones.</div>
+          <div class="role-actions">
+            <button class="btn" onclick="login('chofer')">Entrar como Conductor</button>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal contraseña Administrador -->
+  <div id="modalMask" class="modal-mask" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <header id="modalTitle">Acceso Administrador</header>
+      <div class="body">
+        <label>Contraseña
+          <input type="password" id="adminPass" placeholder="Ingresa tu contraseña">
+        </label>
+        <p id="passMsg" class="muted" style="margin-top:8px;"></p>
+      </div>
+      <div class="actions">
+        <button class="btn-outline" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn" onclick="loginAdmin()">Entrar</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="login-footer">
+    <p class="muted">&copy; 2025 Gestión de Mantenciones — Tema azul/blanco</p>
+  </footer>
+
+  <script>
+    const SESSION_KEY = "app_role_token";
+    const ADMIN_PASSWORD = "123456";
+
+    function login(role) {
+      localStorage.setItem(SESSION_KEY, role);
+      switch (role) {
+        case 'mecanico': window.location.href = "mecanico.html"; break;
+        case 'chofer': window.location.href = "chofer.html"; break;
+      }
+    }
+
+    function abrirModal() {
+      document.getElementById('modalMask').style.display = 'flex';
+      setTimeout(() => { document.getElementById('adminPass').focus(); }, 50);
+    }
+    function cerrarModal() {
+      document.getElementById('modalMask').style.display = 'none';
+      document.getElementById('adminPass').value = "";
+      document.getElementById('passMsg').textContent = "";
+    }
+    function loginAdmin() {
+      const v = document.getElementById('adminPass').value;
+      const msg = document.getElementById('passMsg');
+      if (!v) { msg.textContent = "Ingresa la contraseña."; return; }
+      if (v !== ADMIN_PASSWORD) {
+        msg.textContent = "Contraseña incorrecta.";
+        return;
+      }
+      localStorage.setItem(SESSION_KEY, 'admin');
+      window.location.href = "jefe.html";
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') cerrarModal();
+    });
+    document.getElementById('modalMask').addEventListener('click', (e) => {
+      if (e.target.id === 'modalMask') cerrarModal();
+    });
+  </script>
+</body>
+
+</html>
